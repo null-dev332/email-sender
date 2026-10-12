@@ -2,13 +2,12 @@ package utb.fai;
 
 import java.net.*;
 import java.io.*;
-import java.nio.charset.StandardCharsets;
 
 public class EmailSender {
 
-    private final Socket socket;
-    private final BufferedReader reader;
-    private final Writer writer;
+    private Socket socket;
+    private InputStream in;
+    private OutputStream out;
 
     /*
      * Constructor opens Socket to host/port. If the Socket throws an exception
@@ -17,14 +16,14 @@ public class EmailSender {
      */
     public EmailSender(String host, int port) throws UnknownHostException, IOException {
         socket = new Socket(host, port);
-        socket.setSoTimeout(10000);
-        reader = new BufferedReader(new InputStreamReader(socket.getInputStream(), StandardCharsets.UTF_8));
-        writer = new BufferedWriter(new OutputStreamWriter(socket.getOutputStream(), StandardCharsets.UTF_8));
+        in = socket.getInputStream();
+        out = socket.getOutputStream();
 
-        // uvitaci zprava serveru (220)
-        expect(220);
-        sendCommand("EHLO " + InetAddress.getLocalHost().getHostName());
-        expect(250);
+        // uvitaci zprava serveru
+        sleep(100);
+        readResponse();
+
+        sendCommand("EHLO localhost\r\n");
     }
 
     /*
@@ -34,32 +33,17 @@ public class EmailSender {
      * handled by this method.
      */
     public void send(String from, String to, String subject, String text) throws IOException {
-        sendCommand("MAIL FROM:<" + from + ">");
-        expect(250);
-        sendCommand("RCPT TO:<" + to + ">");
-        expect(250, 251);
-        sendCommand("DATA");
-        expect(354);
+        sendCommand("MAIL FROM:<" + from + ">\r\n");
+        sendCommand("RCPT TO:<" + to + ">\r\n");
+        sendCommand("DATA\r\n");
 
-        StringBuilder message = new StringBuilder();
-        message.append("From: ").append(from).append("\r\n");
-        message.append("To: ").append(to).append("\r\n");
-        message.append("Subject: ").append(subject).append("\r\n");
-        message.append("Content-Type: text/plain; charset=UTF-8\r\n");
-        message.append("\r\n");
-
-        // radky zacinajici teckou se musi zdvojit, jinak by server bral "." jako konec zpravy
-        String[] lines = text.split("\r?\n", -1);
-        for (String line : lines) {
-            if (line.startsWith(".")) {
-                message.append('.');
-            }
-            message.append(line).append("\r\n");
-        }
-        message.append(".");
-
-        sendCommand(message.toString());
-        expect(250);
+        String message = "From: " + from + "\r\n"
+                + "To: " + to + "\r\n"
+                + "Subject: " + subject + "\r\n"
+                + "\r\n"
+                + text + "\r\n"
+                + ".\r\n";
+        sendCommand(message);
     }
 
     /*
@@ -67,49 +51,35 @@ public class EmailSender {
      */
     public void close() {
         try {
-            sendCommand("QUIT");
-            expect(221);
+            sendCommand("QUIT\r\n");
+            socket.close();
         } catch (IOException e) {
-            // spojeni se zavira tak jako tak
-        } finally {
-            try {
-                socket.close();
-            } catch (IOException e) {
-                // nelze nic delat
-            }
+            e.printStackTrace();
         }
     }
 
-    private void sendCommand(String command) throws IOException {
-        writer.write(command + "\r\n");
-        writer.flush();
+    private void sendCommand(String message) throws IOException {
+        out.write(message.getBytes());
+        out.flush();
+
+        sleep(100);
+        readResponse();
     }
 
-    /*
-     * Precte odpoved serveru (i viceradkovou, napr. "250-...") a overi navratovy kod.
-     */
-    private String expect(int... expectedCodes) throws IOException {
-        StringBuilder response = new StringBuilder();
-        String line;
-        do {
-            line = reader.readLine();
-            if (line == null) {
-                throw new IOException("Server ukoncil spojeni");
-            }
-            response.append(line).append('\n');
-        } while (line.length() > 3 && line.charAt(3) == '-');
+    private void readResponse() throws IOException {
+        final byte[] buffer = new byte[256];
+        int len;
+        while (in.available() > 0) {
+            len = in.read(buffer, 0, 256);
+            System.out.write(buffer, 0, len);
+        }
+    }
 
-        int code;
+    private void sleep(int ms) {
         try {
-            code = Integer.parseInt(line.substring(0, 3));
-        } catch (NumberFormatException | StringIndexOutOfBoundsException e) {
-            throw new IOException("Neplatna odpoved serveru: " + line);
+            Thread.sleep(ms);
+        } catch (InterruptedException e) {
+            e.printStackTrace();
         }
-        for (int expected : expectedCodes) {
-            if (code == expected) {
-                return response.toString();
-            }
-        }
-        throw new IOException("Neocekavana odpoved serveru: " + response.toString().trim());
     }
 }
