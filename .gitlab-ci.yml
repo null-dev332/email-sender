@@ -3,6 +3,18 @@ image: gradle:jdk17
 before_script:
   - GRADLE_USER_HOME="$(pwd)/.gradle"
   - export GRADLE_USER_HOME
+  # skolni runner (shell executor) nema Javu -> stahne se JDK 17, pokud chybi
+  - |
+    if ! command -v java >/dev/null 2>&1; then
+      JDK_DIR="$HOME/jdk17"
+      if [ ! -x "$JDK_DIR/bin/java" ]; then
+        mkdir -p "$JDK_DIR"
+        curl -fsSL "https://api.adoptium.net/v3/binary/latest/17/ga/linux/x64/jdk/hotspot/normal/eclipse" | tar -xz -C "$JDK_DIR" --strip-components=1
+      fi
+      export JAVA_HOME="$JDK_DIR"
+      export PATH="$JAVA_HOME/bin:$PATH"
+    fi
+  - java -version
 
 stages:
   - build
